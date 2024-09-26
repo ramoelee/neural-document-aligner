@@ -25,6 +25,11 @@ import levenshtein
 from exceptions import FileFoundError
 import constants
 
+import time
+
+
+from sentence_transformers import SentenceTransformer
+
 def generate_embeddings(docs, embedding_file, lang, generate=False, optimization_strategy=None, model=None,
                         max_mbytes_per_batch=constants.DEFAULT_MAX_MBYTES_PER_BATCH,
                         embeddings_batch_size=constants.DEFAULT_BATCH_SIZE, sentence_splitting=constants.DEFAULT_SENTENCE_SPLITTING,
@@ -681,7 +686,7 @@ def preprocess(src_docs, trg_docs, src_embeddings, trg_embeddings, **kwargs):
 
     return src_embeddings, trg_embeddings
 
-def get_faiss(src_docs, trg_docs, src_embeddings, trg_embeddings, take_knn=5, faiss_reverse_direction=False,
+def get_faiss(src_docs, trg_docs, src_embeddings, trg_embeddings, take_knn=10, faiss_reverse_direction=False,
               dim=constants.DEFAULT_EMBEDDING_DIM, threshold=None):
     results = []
 
@@ -928,12 +933,96 @@ def get_distance(src_embeddings, trg_embeddings, src_docs, trg_docs, noprocesses
     return results_distance
 
 def docalign_strategy_applies_own_embedding_merging(docalign_strategy):
-    if docalign_strategy in ("faiss", "just-merge"):
+    if docalign_strategy in ("faiss", "just-merge", "mix-faiss-lev-full", "avg_max"):
         return False
     elif docalign_strategy in ("lev", "lev-full"):
         return True
 
     raise Exception(f"unknown docalign strategy: '{docalign_strategy}'")
+
+
+def get_max_avg(src_urls, trg_urls, src_embeddings, trg_embeddings, model):
+    final_results = []
+
+    modelsentence = SentenceTransformer(model)
+    print(f"model {model}")
+
+    # results_lev = []
+    # trm_rs = [src_doc, trg_doc, avg_sum_max]
+    # results_lev.append(trm_rs)
+
+    avg_sum_max_all = []
+    start_time_all = time.time()
+    # for i in range(len(src_embeddings)):
+    #     avg_sum_max_entry = []
+    #     for j in range(len(trg_embeddings)):
+    # for i in range(2):
+    for i in range(len(src_embeddings)):
+        avg_sum_max_entry = []
+        for j in range(len(trg_embeddings)):
+            similarities = None
+
+            start_time = time.time()
+
+            if len(src_embeddings[i]) >= len(trg_embeddings[j]):
+                similarities = modelsentence.similarity(src_embeddings[i], trg_embeddings[j])
+            else:
+                similarities = modelsentence.similarity(trg_embeddings[j], src_embeddings[i])
+
+            closeSentence = abs(len(src_embeddings[i]) - len(trg_embeddings[j]))
+            if closeSentence > 150 :
+                closeSentence = 150
+            elif closeSentence < 50:
+                closeSentence = 50
+
+            sentence_count_analize = 0
+            sum_max = 0
+
+            for k in range(len(similarities)-1): 
+                left_bound = k
+                if k - closeSentence > 0:
+                    left_bound = k-closeSentence
+                
+                if left_bound > len(similarities[k])-closeSentence :
+                    left_bound = len(similarities[k])-closeSentence
+
+                right_bound = k+closeSentence
+                if k + closeSentence > (len(similarities[k]) -1):
+                    right_bound = len(similarities[k])
+                
+                if len(similarities[k][left_bound:right_bound]) > 0:
+                    sum_max = sum_max + max(similarities[k][left_bound:right_bound])
+                    sentence_count_analize += 1
+
+            
+            avg_sum_max=sum_max/sentence_count_analize
+            avg_sum_max_entry.append(avg_sum_max)
+
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+
+            # print(f"{i} vs {j} = {elapsed_time} seconds.")
+
+
+        avg_sum_max_all.append(avg_sum_max_entry)
+    
+    end_time_all = time.time()
+    elapsed_time_all = end_time_all - start_time_all
+
+    print(f"Elapsed all = {elapsed_time_all/(60)} mins.")
+
+    i = 0
+    for avg_sum_max_entry in avg_sum_max_all:
+        max_avg=max(avg_sum_max_entry)
+        trg_index = avg_sum_max_entry.index(max_avg)
+        final_results.append([src_urls[i], trg_urls[trg_index], max_avg.item()])
+        # print(f"max={max_avg} : {avg_sum_max_entry}")
+        i +=1
+    
+
+    return final_results
+
+
 
 def main(args):
     # Args
@@ -1046,6 +1135,10 @@ def main(args):
 
     src_embeddings = []
     trg_embeddings = []
+    src_embeddings_merge = []
+    trg_embeddings_merge = []
+    src_embeddings_original = []
+    trg_embeddings_original = []
     start_idx = 0
     end_idx = 0
     max_length_docs = max(len(src_docs), len(trg_docs))
@@ -1065,10 +1158,16 @@ def main(args):
                 src_emb = get_embedding_vectors(src_embeddings_fd, dim=dim, optimization_strategy=emb_optimization_strategy)
 
                 src_embeddings.append(src_emb)
+                src_embeddings_original.append(src_emb)
+                if docalign_strategy in ("mix-faiss-lev-full", "avg_max"):
+                    src_embeddings_merge.append(src_emb)
             for _ in range(start_idx, min(end_idx, len(trg_docs))): # trg embeddings
                 trg_emb = get_embedding_vectors(trg_embeddings_fd, dim=dim, optimization_strategy=emb_optimization_strategy)
 
                 trg_embeddings.append(trg_emb)
+                trg_embeddings_original.append(trg_emb)
+                if docalign_strategy in ("mix-faiss-lev-full", "avg_max"):
+                    trg_embeddings_merge.append(trg_emb)
         except ValueError as e:
             raise Exception("could not load the embeddings (correct number of embeddings to load from file?)") from e
 
@@ -1101,6 +1200,14 @@ def main(args):
                        src_embeddings[start_idx:end_idx], trg_embeddings[start_idx:end_idx],
                        weights_strategy=weights_strategy, merging_strategy=merging_strategy, mask_value=mask_value,
                        check_zeros_mask=args.check_zeros_mask, do_not_merge_on_preprocessing=do_not_merge_on_preprocessing,
+                       providing_values_instead_of_paths=paths_to_docs_are_base64_values)
+        if docalign_strategy == "mix-faiss-lev-full" :
+            src_embeddings_merge[start_idx:end_idx], trg_embeddings_merge[start_idx:end_idx] = \
+            preprocess(src_docs_values[start_idx:end_idx] if paths_to_docs_are_base64_values else src_docs[start_idx:end_idx],
+                       trg_docs_values[start_idx:end_idx] if paths_to_docs_are_base64_values else trg_docs[start_idx:end_idx],
+                       src_embeddings_merge[start_idx:end_idx], trg_embeddings_merge[start_idx:end_idx],
+                       weights_strategy=weights_strategy, merging_strategy=merging_strategy, mask_value=mask_value,
+                       check_zeros_mask=args.check_zeros_mask, do_not_merge_on_preprocessing=True,
                        providing_values_instead_of_paths=paths_to_docs_are_base64_values)
 
     src_embeddings_fd.close()
@@ -1189,6 +1296,226 @@ def main(args):
 
             results_variable = union_and_int_distance["intersection"]
 
+    # Docalign, results and, optionally, evaluation
+    elif docalign_strategy == "mix-faiss-lev-full":
+
+        #Lee Test
+        modelsentence = SentenceTransformer(model)
+        print(f"model {model}")
+        # # print("###################################################################")
+        # # print(f"{src_embeddings[0]}")
+        # # print("###################################################################")
+        # # print(f"{trg_embeddings[0]}")
+
+        # similarities  = modelsentence.similarity(src_embeddings[0], trg_embeddings[0])
+        # print("similarities======================")
+        # print(similarities)
+        # print("Done")
+
+        # # print("###################################################################")
+        # # print(f"{src_embeddings_original[0]}")
+        # # print("###################################################################")
+        # # print(f"{trg_embeddings_original[0]}")
+
+        # similarities  = modelsentence.similarity(src_embeddings_original[0], trg_embeddings_original[0])
+        # print("Originals similarities======================")
+        # print(similarities)
+        # print("Done")
+
+        # similarities  = modelsentence.similarity(src_embeddings_merge[0], trg_embeddings_merge[0])
+        # print("Merge similarities======================")
+        # print(similarities)
+        # print("Done")
+        
+        # # print(f"{similarities[:6][0:9]}")
+
+        # for i in range(16): 
+        #     print(f"{i+1}\tMAX={max(similarities[i][i:i+15])}, {similarities[i][0:15]}")
+        
+        
+        closeSentence = 500
+
+        # sentence_count_analize = 0
+        # sum_max = 0
+
+        # for i in range(len(similarities)-1): 
+        # # for i in range(500):
+        #     left_bound = i
+        #     if i - closeSentence > 0:
+        #         left_bound = i-closeSentence
+            
+        #     if left_bound > len(similarities[i])-closeSentence :
+        #         left_bound = len(similarities[i])-closeSentence
+
+        #     # if left_bound-closeSentence == len(similarities[i]) 
+
+        #     right_bound = i+closeSentence
+        #     if i + closeSentence > (len(similarities[i]) -1):
+        #         right_bound = len(similarities[i])
+            
+        #     print(f"{i} : {left_bound},{right_bound}")
+        #     print(f"{similarities[i][left_bound:right_bound]}")
+        #     if len(similarities[i][left_bound:right_bound]) > 0:
+        #         sum_max = sum_max + max(similarities[i][left_bound:right_bound])
+        #         sentence_count_analize += 1
+
+        #     # if i >= len(similarities[i]) + closeSentence:
+        #     #     break
+        
+        # print(f"sum_max={sum_max}")
+
+        # # avg_sum_max=sum_max/len(similarities)
+        # avg_sum_max=sum_max/sentence_count_analize
+        # print(f"avg_sum_max={avg_sum_max}")
+
+               
+
+        # sys.exit()
+
+        # Call Faiss
+        faiss_reverse_direction = args.faiss_reverse_direction
+        faiss_take_knn = args.faiss_take_knn
+
+        faiss_args = [src_docs, trg_docs, src_embeddings, trg_embeddings]
+
+        if docs_were_not_provided:
+            faiss_args = [src_urls, trg_urls, src_embeddings, trg_embeddings]
+
+        if faiss_reverse_direction:
+            faiss_args = [faiss_args[1], faiss_args[0], faiss_args[3], faiss_args[2]]
+
+        isreverse = False
+        results_faiss_reverse = []
+
+        results_faiss = get_faiss(*faiss_args, take_knn=int(faiss_take_knn), faiss_reverse_direction=faiss_reverse_direction,
+                                  dim=dim, threshold=threshold)
+        
+        if isreverse :
+            results_faiss_reverse = get_faiss(*faiss_args, take_knn=int(faiss_take_knn), faiss_reverse_direction=True,
+                                  dim=dim, threshold=threshold)
+        
+        # Validate by "lev-full"
+        results_faiss_tmp = results_faiss
+        
+        print("Foward=")
+        for resultentry in results_faiss: 
+            print(f"{resultentry[0]}\t{resultentry[1]}\t{resultentry[-1]}")
+
+        # print("Reverse=")
+
+        # for resultentry in results_faiss_reverse: 
+        #     print(f"{resultentry[1]}\t{resultentry[0]}\t{resultentry[-1]}")
+        
+        results_faiss_reverse = []
+        results_faiss = []
+
+       
+        # if isreverse :
+        #     results_faiss_tmp = results_faiss_reverse
+
+        for resultentry in results_faiss_tmp:
+            if isreverse :
+                src_doc = resultentry[1]
+                trg_doc = resultentry[0]
+                score = resultentry[-1]
+            else:
+                src_doc = resultentry[0]
+                trg_doc = resultentry[1]
+                score = resultentry[-1]
+
+            src_urls_retry = []
+            trg_urls_retry = []
+            src_embeddings_retry = []
+            trg_embeddings_retry = []
+
+            src_idx = src_docs.index(src_doc)
+            src_urls_retry.append(src_doc)
+            src_embeddings_retry.append(src_embeddings_merge[src_idx])
+
+                # src_doc = src_urls[src_idx]
+
+            trg_idx = trg_docs.index(trg_doc)
+            trg_urls_retry.append(trg_doc)
+            trg_embeddings_retry.append(trg_embeddings_merge[trg_idx])
+
+            closeSentence = abs(len(src_embeddings_retry[0]) - len(trg_embeddings_retry[0]))
+            if closeSentence > 300 :
+                closeSentence = 300
+            elif closeSentence < 50:
+                closeSentence = 50
+
+            similarities = None
+
+            if len(src_embeddings_retry[0]) > len(trg_embeddings_retry[0]) : 
+                similarities  = modelsentence.similarity(src_embeddings_retry[0], trg_embeddings_retry[0])
+            else:
+                similarities  = modelsentence.similarity(trg_embeddings_retry[0], src_embeddings_retry[0])
+
+            sentence_count_analize = 0
+            sum_max = 0
+
+            for i in range(len(similarities)-1): 
+            # for i in range(500):
+                left_bound = i
+                if i - closeSentence > 0:
+                    left_bound = i-closeSentence
+                
+                if left_bound > len(similarities[i])-closeSentence :
+                    left_bound = len(similarities[i])-closeSentence
+
+                # if left_bound-closeSentence == len(similarities[i]) 
+
+                right_bound = i+closeSentence
+                if i + closeSentence > (len(similarities[i]) -1):
+                    right_bound = len(similarities[i])
+                
+                # print(f"{i} : {left_bound},{right_bound}")
+                # print(f"{similarities[i][left_bound:right_bound]}")
+                if len(similarities[i][left_bound:right_bound]) > 0:
+                    sum_max = sum_max + max(similarities[i][left_bound:right_bound])
+                    sentence_count_analize += 1
+
+                # if i >= len(similarities[i]) + closeSentence:
+                #     break
+            
+            # print(f"sum_max={sum_max}")
+
+            # avg_sum_max=sum_max/len(similarities)
+            avg_sum_max=sum_max/sentence_count_analize
+            # print(f"avg_sum_max={avg_sum_max}")
+
+            results_lev = []
+            trm_rs = [src_doc, trg_doc, avg_sum_max]
+            results_lev.append(trm_rs)
+
+            # results_lev = get_lev(src_embeddings_merge, trg_embeddings_merge, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,
+            # results_lev = get_lev(src_embeddings_retry, trg_embeddings_retry, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,
+            #                   noworkers=noworkers, full=False ,
+            #                   apply_heuristics=True, threshold=threshold)
+            
+            if len(results_lev) > 0 :
+                results_faiss.append(results_lev[0])
+
+
+        # return result, scores 
+
+        urls_aligned_faiss, scores = docalign(results_faiss, src_docs, trg_docs, src_urls, trg_urls, output_with_urls, only_docalign=True)
+
+        if results_strategy == 0:
+            logging.info(f"Results: get the best {faiss_take_knn} matches from src to trg docs, sort by score and do not select the either of the two docs again")
+
+            results_variable = urls_aligned_faiss
+
+    # Docalign, results and, optionally, evaluation
+    elif docalign_strategy == "avg_max":
+        results_faiss = get_max_avg(src_docs, trg_docs, src_embeddings_merge, trg_embeddings_merge, model)
+        print(f"{results_faiss}")
+        urls_aligned_faiss, scores = docalign(results_faiss, src_docs, trg_docs, src_urls, trg_urls, output_with_urls, only_docalign=True)
+
+        if results_strategy == 0:
+            # logging.info(f"Results: get the best {faiss_take_knn} matches from src to trg docs, sort by score and do not select the either of the two docs again")
+            results_variable = urls_aligned_faiss
+
     else:
         raise Exception(f"unknown docalign strategy: '{docalign_strategy}'")
 
@@ -1258,7 +1585,7 @@ def parse_args():
 
     # Strategies
     parser.add_argument('--docalign-strategy', default='faiss',
-        choices=['faiss', 'lev', 'lev-full', 'just-merge'],
+        choices=['faiss', 'lev', 'lev-full', 'mix-faiss-lev-full', 'just-merge', 'avg_max'],
         help='Document align strategy to get the pairs of documents aligned. Default is \'faiss\'')
     parser.add_argument('--weights-strategy', default=0, type=int,
         choices=range(0, 3 + 1),
@@ -1346,7 +1673,7 @@ def parse_args():
 def main_wrapper():
     args = parse_args()
 
-    check_args(args)
+    # check_args(args)
 
     try:
         main(args)

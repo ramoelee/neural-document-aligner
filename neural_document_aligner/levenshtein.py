@@ -66,7 +66,7 @@ def levenshtein_opt(embedding_src, embedding_trg, nfactor=1, diff_function_bool=
             "value": m[-1][-1],
             "similarity": 1.0 - m[-1][-1] / nfactor}
 
-def levenshtein_opt_space_and_band(embedding_src, embedding_trg, nfactor=1, percentage=0.3, early_stopping=0.05,
+def levenshtein_opt_space_and_band(embedding_src, embedding_trg, nfactor=1, percentage=0.3, early_stopping=0.50,
                                    diff_function_bool=lambda x, y: x != y, diff_function_value=lambda x, y: 1.0):
     """Levenshtein optimization which uses a matrix of only 2*n rows instead of m*n.
        Besides, only processes the central diagonal of the matrix (central band).
@@ -125,7 +125,7 @@ def levenshtein_opt_space_and_band(embedding_src, embedding_trg, nfactor=1, perc
             m[0] = m[1]
 
             if min(row * deletion_cost, min(m[0])) > early_stopping:
-#                logging.debug(f"Early stopping: [{m[0][0]} ... {m[0][-1]}] (row: {row})")
+                # logging.debug(f"Early stopping: [{m[0][0]} ... {m[0][-1]}] (row: {row}), min={min(m[0])}")
 
                 return {"matrix": m,
                         "value": float(nfactor),

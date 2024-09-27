@@ -1301,78 +1301,10 @@ def main(args):
 
         #Lee Test
         modelsentence = SentenceTransformer(model)
-        print(f"model {model}")
-        # # print("###################################################################")
-        # # print(f"{src_embeddings[0]}")
-        # # print("###################################################################")
-        # # print(f"{trg_embeddings[0]}")
+        # print(f"model {model}")
 
-        # similarities  = modelsentence.similarity(src_embeddings[0], trg_embeddings[0])
-        # print("similarities======================")
-        # print(similarities)
-        # print("Done")
-
-        # # print("###################################################################")
-        # # print(f"{src_embeddings_original[0]}")
-        # # print("###################################################################")
-        # # print(f"{trg_embeddings_original[0]}")
-
-        # similarities  = modelsentence.similarity(src_embeddings_original[0], trg_embeddings_original[0])
-        # print("Originals similarities======================")
-        # print(similarities)
-        # print("Done")
-
-        # similarities  = modelsentence.similarity(src_embeddings_merge[0], trg_embeddings_merge[0])
-        # print("Merge similarities======================")
-        # print(similarities)
-        # print("Done")
-        
-        # # print(f"{similarities[:6][0:9]}")
-
-        # for i in range(16): 
-        #     print(f"{i+1}\tMAX={max(similarities[i][i:i+15])}, {similarities[i][0:15]}")
-        
-        
         closeSentence = 500
 
-        # sentence_count_analize = 0
-        # sum_max = 0
-
-        # for i in range(len(similarities)-1): 
-        # # for i in range(500):
-        #     left_bound = i
-        #     if i - closeSentence > 0:
-        #         left_bound = i-closeSentence
-            
-        #     if left_bound > len(similarities[i])-closeSentence :
-        #         left_bound = len(similarities[i])-closeSentence
-
-        #     # if left_bound-closeSentence == len(similarities[i]) 
-
-        #     right_bound = i+closeSentence
-        #     if i + closeSentence > (len(similarities[i]) -1):
-        #         right_bound = len(similarities[i])
-            
-        #     print(f"{i} : {left_bound},{right_bound}")
-        #     print(f"{similarities[i][left_bound:right_bound]}")
-        #     if len(similarities[i][left_bound:right_bound]) > 0:
-        #         sum_max = sum_max + max(similarities[i][left_bound:right_bound])
-        #         sentence_count_analize += 1
-
-        #     # if i >= len(similarities[i]) + closeSentence:
-        #     #     break
-        
-        # print(f"sum_max={sum_max}")
-
-        # # avg_sum_max=sum_max/len(similarities)
-        # avg_sum_max=sum_max/sentence_count_analize
-        # print(f"avg_sum_max={avg_sum_max}")
-
-               
-
-        # sys.exit()
-
-        # Call Faiss
         faiss_reverse_direction = args.faiss_reverse_direction
         faiss_take_knn = args.faiss_take_knn
 
@@ -1397,9 +1329,10 @@ def main(args):
         # Validate by "lev-full"
         results_faiss_tmp = results_faiss
         
-        print("Foward=")
-        for resultentry in results_faiss: 
-            print(f"{resultentry[0]}\t{resultentry[1]}\t{resultentry[-1]}")
+        # print("Faiss Result:")
+
+        # for resultentry in results_faiss: 
+        #     print(f"{resultentry[0]}\t{resultentry[1]}\t{resultentry[-1]}")
 
         # print("Reverse=")
 

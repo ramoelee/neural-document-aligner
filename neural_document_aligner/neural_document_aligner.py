@@ -26,6 +26,8 @@ from exceptions import FileFoundError
 import constants
 
 import time
+import torch
+from pathlib import Path
 
 
 from sentence_transformers import SentenceTransformer
@@ -940,6 +942,16 @@ def docalign_strategy_applies_own_embedding_merging(docalign_strategy):
 
     raise Exception(f"unknown docalign strategy: '{docalign_strategy}'")
 
+def read_file_to_list(file_path):
+    """
+    Reads a file and returns its contents as a list of strings, where each string is a line from the file.
+
+    :param file_path: Path to the file to be read
+    :return: List of strings, each representing a line from the file
+    """
+    with open(file_path, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+    return [line.strip() for line in lines]
 
 def get_max_avg(src_urls, trg_urls, src_embeddings, trg_embeddings, model):
     final_results = []
@@ -1024,8 +1036,34 @@ def get_max_avg(src_urls, trg_urls, src_embeddings, trg_embeddings, model):
 
 
 
+def write_list_to_file(file_path, lines):
+    """
+    Writes a list of strings to a file, with each string as a new line.
+
+    If the parent directory of the file path does not exist, it will be created.
+
+    :param file_path: Path to the file where the content will be written
+    :param lines: List of strings to be written to the file
+    """
+    # Convert the file path to a Path object
+    file_path = Path(file_path)
+
+    # Create the parent directory if it does not exist
+    if not file_path.parent.exists():
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write the list of lines to the file
+    with file_path.open('w', encoding='utf-8') as file:
+        for line in lines:
+            file.write(f"{line}\n")
+
+
+
+
 def main(args):
     # Args
+    start_time_all = time.time()
+
     src_embeddings_path = utils.expand_and_real_path_and_exists(args.src_embeddings_path)
     trg_embeddings_path = utils.expand_and_real_path_and_exists(args.trg_embeddings_path)
     src_lang = args.src_lang
@@ -1062,11 +1100,23 @@ def main(args):
     src_embeddings_path_exist = os.path.isfile(src_embeddings_path)
     trg_embeddings_path_exist = os.path.isfile(trg_embeddings_path)
 
+    save_sentences = args.save_sentences
+    save_sentences_filepath = args.save_sentences_filePath
+    sentences_similarity_threshold = args.sentences_similarity_threshold
+    save_ouput_docalign_filePath = args.save_ouput_docalign_filePath
+
+    result_sentence = []
+
+    # logging.debug(f"Document alignment start")
+    
+
+
     if (gen_emb_optimization_strategy != emb_optimization_strategy and (not src_embeddings_path_exist or not trg_embeddings_path_exist)):
         raise Exception("embeddings are going to be generated with an optimization strategy different from the one with they will be loaded (check --gen-emb-optimization-strategy and --emb-optimization-strategy)")
 
     # Configure logging
     utils.set_up_logging(level=args.logging_level, filename=args.log_file, display_when_file=args.log_display)
+    logging.info(f"Document alignment start")
 
     # Process input file
     src_docs, trg_docs, src_urls, trg_urls = process_input_file(args, max_noentries)
@@ -1137,8 +1187,6 @@ def main(args):
     trg_embeddings = []
     src_embeddings_merge = []
     trg_embeddings_merge = []
-    src_embeddings_original = []
-    trg_embeddings_original = []
     start_idx = 0
     end_idx = 0
     max_length_docs = max(len(src_docs), len(trg_docs))
@@ -1158,14 +1206,12 @@ def main(args):
                 src_emb = get_embedding_vectors(src_embeddings_fd, dim=dim, optimization_strategy=emb_optimization_strategy)
 
                 src_embeddings.append(src_emb)
-                src_embeddings_original.append(src_emb)
                 if docalign_strategy in ("mix-faiss-lev-full", "avg_max"):
                     src_embeddings_merge.append(src_emb)
             for _ in range(start_idx, min(end_idx, len(trg_docs))): # trg embeddings
                 trg_emb = get_embedding_vectors(trg_embeddings_fd, dim=dim, optimization_strategy=emb_optimization_strategy)
 
                 trg_embeddings.append(trg_emb)
-                trg_embeddings_original.append(trg_emb)
                 if docalign_strategy in ("mix-faiss-lev-full", "avg_max"):
                     trg_embeddings_merge.append(trg_emb)
         except ValueError as e:
@@ -1346,6 +1392,8 @@ def main(args):
         # if isreverse :
         #     results_faiss_tmp = results_faiss_reverse
 
+        
+
         for resultentry in results_faiss_tmp:
             if isreverse :
                 src_doc = resultentry[1]
@@ -1378,15 +1426,18 @@ def main(args):
                 closeSentence = 50
 
             similarities = None
+            isBackwardFlag = False
 
             if len(src_embeddings_retry[0]) > len(trg_embeddings_retry[0]) : 
                 similarities  = modelsentence.similarity(src_embeddings_retry[0], trg_embeddings_retry[0])
             else:
                 similarities  = modelsentence.similarity(trg_embeddings_retry[0], src_embeddings_retry[0])
+                isBackwardFlag = True
 
             sentence_count_analize = 0
             sum_max = 0
 
+            goodSentenceindex = []
             for i in range(len(similarities)-1): 
             # for i in range(500):
                 left_bound = i
@@ -1405,8 +1456,19 @@ def main(args):
                 # print(f"{i} : {left_bound},{right_bound}")
                 # print(f"{similarities[i][left_bound:right_bound]}")
                 if len(similarities[i][left_bound:right_bound]) > 0:
-                    sum_max = sum_max + max(similarities[i][left_bound:right_bound])
+                    maxtmp = max(similarities[i][left_bound:right_bound])
+                    sum_max = sum_max + maxtmp.item()
                     sentence_count_analize += 1
+
+                    if save_sentences and maxtmp.item() >= sentences_similarity_threshold :
+                        idxmax = torch.argmax(similarities[i]).item()
+                        if isBackwardFlag:
+                            goodSentenceindex.append([idxmax, i, maxtmp.item()])
+                        else:
+                            goodSentenceindex.append([i, idxmax, maxtmp.item()])
+
+                        
+
 
                 # if i >= len(similarities[i]) + closeSentence:
                 #     break
@@ -1420,6 +1482,9 @@ def main(args):
             results_lev = []
             trm_rs = [src_doc, trg_doc, avg_sum_max]
             results_lev.append(trm_rs)
+
+            if save_sentences:
+                result_sentence.append([src_doc, trg_doc , avg_sum_max, goodSentenceindex])
 
             # results_lev = get_lev(src_embeddings_merge, trg_embeddings_merge, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,
             # results_lev = get_lev(src_embeddings_retry, trg_embeddings_retry, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,
@@ -1441,9 +1506,9 @@ def main(args):
 
     # Docalign, results and, optionally, evaluation
     elif docalign_strategy == "avg_max":
-        results_faiss = get_max_avg(src_docs, trg_docs, src_embeddings_merge, trg_embeddings_merge, model)
-        print(f"{results_faiss}")
-        urls_aligned_faiss, scores = docalign(results_faiss, src_docs, trg_docs, src_urls, trg_urls, output_with_urls, only_docalign=True)
+        results_avg_max = get_max_avg(src_docs, trg_docs, src_embeddings_merge, trg_embeddings_merge, model)
+        # print(f"{results_faiss}")
+        urls_aligned_faiss, scores = docalign(results_avg_max, src_docs, trg_docs, src_urls, trg_urls, output_with_urls, only_docalign=True)
 
         if results_strategy == 0:
             # logging.info(f"Results: get the best {faiss_take_knn} matches from src to trg docs, sort by score and do not select the either of the two docs again")
@@ -1455,55 +1520,143 @@ def main(args):
     if results_variable is None:
         raise Exception("could not get the results (maybe wrong results strategy?)")
 
-    # Print header
-    if output_with_idxs:
-        sys.stdout.write("src_idx\ttrg_idx")
-    else:
-        sys.stdout.write("src_url\ttrg_url")
+    if len(save_ouput_docalign_filePath) > 0:
 
-    if do_not_show_scores:
-        sys.stdout.write("\n")
-    else:
-        sys.stdout.write("\tnda_score\n")
-
-    # Print results
-    for r in results_variable:
-        src_result = r[0]
-        trg_result = r[1]
-        score = "unknown"
-        hash_score = hash(r[0]) + hash(r[1])
-
-        if hash_score in scores.keys():
-            score = scores[hash_score]
-
-        # Use indexes?
+        # Print header
+        output_list = []
+        header = ""
         if output_with_idxs:
-            if (docs_were_not_provided or output_with_urls):
-                # The results contain URLs
-                src_result = src_urls.index(src_result)
-                trg_result = trg_urls.index(trg_result)
-            else:
-                # The results contain documents paths
-                src_result = src_docs.index(src_result)
-                trg_result = trg_docs.index(trg_result)
+            header = "src_idx\ttrg_idx"
+        else:
+            header = "src_url\ttrg_url"
 
-            # Range: [1, N]
-            src_result += 1
-            trg_result += 1
+        if not do_not_show_scores:
+            header +="\tnda_score"
+        
+        output_list.append(header)
+
+        # Print results
+        for r in results_variable:
+            src_result = r[0]
+            trg_result = r[1]
+            score = "unknown"
+            hash_score = hash(r[0]) + hash(r[1])
+
+            if hash_score in scores.keys():
+                score = scores[hash_score]
+
+            # Use indexes?
+            if output_with_idxs:
+                if (docs_were_not_provided or output_with_urls):
+                    # The results contain URLs
+                    src_result = src_urls.index(src_result)
+                    trg_result = trg_urls.index(trg_result)
+                else:
+                    # The results contain documents paths
+                    src_result = src_docs.index(src_result)
+                    trg_result = trg_docs.index(trg_result)
+
+                # Range: [1, N]
+                src_result += 1
+                trg_result += 1
+
+            if do_not_show_scores:
+                output_list.append(f"{src_result}\t{trg_result}")
+            else:
+                output_list.append(f"{src_result}\t{trg_result}\t{score}")
+
+            write_list_to_file(save_ouput_docalign_filePath, output_list)
+    else:
+        # Print header
+        if output_with_idxs:
+            sys.stdout.write("src_idx\ttrg_idx")
+        else:
+            sys.stdout.write("src_url\ttrg_url")
 
         if do_not_show_scores:
-            print(f"{src_result}\t{trg_result}")
+            sys.stdout.write("\n")
         else:
-            print(f"{src_result}\t{trg_result}\t{score}")
+            sys.stdout.write("\tnda_score\n")
+
+        # Print results
+        for r in results_variable:
+            src_result = r[0]
+            trg_result = r[1]
+            score = "unknown"
+            hash_score = hash(r[0]) + hash(r[1])
+
+            if hash_score in scores.keys():
+                score = scores[hash_score]
+
+            # Use indexes?
+            if output_with_idxs:
+                if (docs_were_not_provided or output_with_urls):
+                    # The results contain URLs
+                    src_result = src_urls.index(src_result)
+                    trg_result = trg_urls.index(trg_result)
+                else:
+                    # The results contain documents paths
+                    src_result = src_docs.index(src_result)
+                    trg_result = trg_docs.index(trg_result)
+
+                # Range: [1, N]
+                src_result += 1
+                trg_result += 1
+
+            if do_not_show_scores:
+                print(f"{src_result}\t{trg_result}")
+            else:
+                print(f"{src_result}\t{trg_result}\t{score}") 
 
     # Evaluation
     if gold_standard:
         recall, precision = evaluate.process_gold_standard(gold_standard, results_variable)
         print(f"recall, precision: {recall}, {precision}")
 
+    if save_sentences and len(save_sentences_filepath) > 0:
+        
+        sentence_output_txt = []
+        sentence_output_txt.append(f"Source Document\tTarget Document\tDocument alignment Score\tSentence Source\tSentence Target\tSimilarity Score")
+
+        for entry in result_sentence:
+            sourceFilepath = entry[0]
+            targetFilepath = entry[1]
+            alignScore = entry[2]
+            sentencesAligns = entry[3]
+
+            path = Path(sourceFilepath)
+            sourceFileName = f"{path.parent.name}/{path.name}"
+
+            path = Path(targetFilepath)
+            targetFileName = f"{path.parent.name}/{path.name}"
+
+
+
+            sourceSentences = read_file_to_list(sourceFilepath)
+            targetSentences = read_file_to_list(targetFilepath)
+
+            for sentenceEntry in sentencesAligns:
+                sourceIndex = sentenceEntry[0]
+                targetIndex = sentenceEntry[1]
+                similarityScore = sentenceEntry[2]
+
+                sentence_output_txt.append(f"{sourceFileName}\t{targetFileName}\t{alignScore:.4f}\t{sourceSentences[sourceIndex]}\t{targetSentences[targetIndex]}\t{similarityScore:.4f}")
+
+        # write sentence output file
+        write_list_to_file(save_sentences_filepath, sentence_output_txt)
+
+    end_time_all = time.time()
+    elapsed_time_all = end_time_all - start_time_all
+
+    logging.info(f"Elapsed all = {elapsed_time_all/(60)} mins.")
+    logging.info(f"Document alignment Done")
+
 def check_args(args):
     if (not docalign_strategy_applies_own_embedding_merging(args.docalign_strategy) and args.merging_strategy == 0):
         raise Exception(f"docalign strategy '{args.docalign_strategy}' needs a merging strategy different of 0")
+    
+    if (args.save_sentences and (args.save_sentences_filePath is None or len(args.save_sentences_filePath) <= 0)) :
+        raise Exception(f"If \"--save-sentences\" is true, it require \"--save-sentences-filePath\" to save sentences.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Neural Document Aligner')
@@ -1599,19 +1752,35 @@ def parse_args():
     parser.add_argument('--log-display', action='store_true',
                         help='If you set --log-file, logging messages will still be stored but not displayed to standar error output. With this option, the messages will be stored in the log file and also will be displayed')
 
+    parser.add_argument('--save-sentences', action="store_true",
+        help='If want to save sentences similirity to file.')
+    
+    parser.add_argument('--save-sentences-filePath', default="",
+        help='File path to save match setences.')
+    
+    parser.add_argument('--sentences-similarity-threshold', default=0.85, type=float,
+        help='Sentences similarity threshold (default 0.85).')
+    
+    parser.add_argument('--save-ouput-docalign-filePath', default="",
+        help='File path to save document alignment.')
+
+    
     args = parser.parse_args()
 
     return args
 
 def main_wrapper():
+    
+
     args = parse_args()
 
-    # check_args(args)
+    check_args(args)
 
     try:
         main(args)
     except MemoryError as e:
         raise Exception("you ran out of memory (--max-loaded-sent-embs-at-once might be a solution)") from e
+    
 
 if __name__ == '__main__':
     main_wrapper()

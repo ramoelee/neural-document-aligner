@@ -1514,7 +1514,7 @@ def main(args):
 
 
         # return result, scores 
-
+        results_faiss.sort(key=lambda x: x[2], reverse=True)
         urls_aligned_faiss, scores = docalign(results_faiss, src_docs, trg_docs, src_urls, trg_urls, output_with_urls, only_docalign=True)
 
         if results_strategy == 0:

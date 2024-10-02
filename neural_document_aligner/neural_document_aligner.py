@@ -1413,6 +1413,8 @@ def main(args):
             src_urls_retry.append(src_doc)
             src_embeddings_retry.append(src_embeddings_merge[src_idx])
 
+            
+
                 # src_doc = src_urls[src_idx]
 
             trg_idx = trg_docs.index(trg_doc)
@@ -1433,6 +1435,14 @@ def main(args):
             else:
                 similarities  = modelsentence.similarity(trg_embeddings_retry[0], src_embeddings_retry[0])
                 isBackwardFlag = True
+
+            
+            if isBackwardFlag:
+                source_lines = read_file_to_list(trg_doc)
+                target_lines = read_file_to_list(src_doc)
+            else:
+                source_lines = read_file_to_list(src_doc)
+                target_lines = read_file_to_list(trg_doc)
 
             sentence_count_analize = 0
             sum_max = 0
@@ -1455,13 +1465,20 @@ def main(args):
                 
                 # print(f"{i} : {left_bound},{right_bound}")
                 # print(f"{similarities[i][left_bound:right_bound]}")
+                if len(source_lines[i].strip()) == 0:
+                    continue
+
                 if len(similarities[i][left_bound:right_bound]) > 0:
                     maxtmp = max(similarities[i][left_bound:right_bound])
+                    idxmax = torch.argmax(similarities[i]).item()
+
+                    if len(target_lines[idxmax].strip()) == 0:
+                        continue
+
                     sum_max = sum_max + maxtmp.item()
                     sentence_count_analize += 1
 
                     if save_sentences and maxtmp.item() >= sentences_similarity_threshold :
-                        idxmax = torch.argmax(similarities[i]).item()
                         if isBackwardFlag:
                             goodSentenceindex.append([idxmax, i, maxtmp.item()])
                         else:

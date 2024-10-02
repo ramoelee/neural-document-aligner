@@ -1502,6 +1502,7 @@ def main(args):
 
             if save_sentences:
                 result_sentence.append([src_doc, trg_doc , avg_sum_max, goodSentenceindex])
+                result_sentence.sort(key=lambda x: x[2], reverse=True)
 
             # results_lev = get_lev(src_embeddings_merge, trg_embeddings_merge, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,
             # results_lev = get_lev(src_embeddings_retry, trg_embeddings_retry, src_urls_retry, trg_urls_retry, noprocesses=noprocesses,

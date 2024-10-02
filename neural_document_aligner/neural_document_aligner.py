@@ -1537,94 +1537,65 @@ def main(args):
 
     if results_variable is None:
         raise Exception("could not get the results (maybe wrong results strategy?)")
+    
+    # Print header
+    output_list = []
+    output_listtmp = []
+    header = ""
+    if output_with_idxs:
+        header = "src_idx\ttrg_idx"
+    else:
+        header = "src_url\ttrg_url"
+
+    if not do_not_show_scores:
+        header +="\tnda_score"
+    
+    output_list.append(header)
+
+    # Print results
+    for r in results_variable:
+        src_result = r[0]
+        trg_result = r[1]
+        score = "unknown"
+        hash_score = hash(r[0]) + hash(r[1])
+
+        if hash_score in scores.keys():
+            score = scores[hash_score]
+
+        # Use indexes?
+        if output_with_idxs:
+            if (docs_were_not_provided or output_with_urls):
+                # The results contain URLs
+                src_result = src_urls.index(src_result)
+                trg_result = trg_urls.index(trg_result)
+            else:
+                # The results contain documents paths
+                src_result = src_docs.index(src_result)
+                trg_result = trg_docs.index(trg_result)
+
+            # Range: [1, N]
+            src_result += 1
+            trg_result += 1
+
+        output_listtmp.append([src_result, trg_result, score])
+
+    output_listtmp.sort(key=lambda x: x[2], reverse=True)
+
+
+    for o in output_listtmp:
+        if do_not_show_scores:
+            output_list.append(f"{o[1]}\t{o[1]}")
+        else:
+            output_list.append(f"{o[1]}\t{o[1]}\t{o[2]}")
+
 
     if len(save_ouput_docalign_filePath) > 0:
-
-        # Print header
-        output_list = []
-        header = ""
-        if output_with_idxs:
-            header = "src_idx\ttrg_idx"
-        else:
-            header = "src_url\ttrg_url"
-
-        if not do_not_show_scores:
-            header +="\tnda_score"
-        
-        output_list.append(header)
-
-        # Print results
-        for r in results_variable:
-            src_result = r[0]
-            trg_result = r[1]
-            score = "unknown"
-            hash_score = hash(r[0]) + hash(r[1])
-
-            if hash_score in scores.keys():
-                score = scores[hash_score]
-
-            # Use indexes?
-            if output_with_idxs:
-                if (docs_were_not_provided or output_with_urls):
-                    # The results contain URLs
-                    src_result = src_urls.index(src_result)
-                    trg_result = trg_urls.index(trg_result)
-                else:
-                    # The results contain documents paths
-                    src_result = src_docs.index(src_result)
-                    trg_result = trg_docs.index(trg_result)
-
-                # Range: [1, N]
-                src_result += 1
-                trg_result += 1
-
-            if do_not_show_scores:
-                output_list.append(f"{src_result}\t{trg_result}")
-            else:
-                output_list.append(f"{src_result}\t{trg_result}\t{score}")
-
-            write_list_to_file(save_ouput_docalign_filePath, output_list)
+        write_list_to_file(save_ouput_docalign_filePath, output_list)
     else:
-        # Print header
-        if output_with_idxs:
-            sys.stdout.write("src_idx\ttrg_idx")
-        else:
-            sys.stdout.write("src_url\ttrg_url")
-
-        if do_not_show_scores:
-            sys.stdout.write("\n")
-        else:
-            sys.stdout.write("\tnda_score\n")
-
         # Print results
-        for r in results_variable:
-            src_result = r[0]
-            trg_result = r[1]
-            score = "unknown"
-            hash_score = hash(r[0]) + hash(r[1])
-
-            if hash_score in scores.keys():
-                score = scores[hash_score]
-
-            # Use indexes?
-            if output_with_idxs:
-                if (docs_were_not_provided or output_with_urls):
-                    # The results contain URLs
-                    src_result = src_urls.index(src_result)
-                    trg_result = trg_urls.index(trg_result)
-                else:
-                    # The results contain documents paths
-                    src_result = src_docs.index(src_result)
-                    trg_result = trg_docs.index(trg_result)
-
-                # Range: [1, N]
-                src_result += 1
-                trg_result += 1
-
-            if do_not_show_scores:
-                print(f"{src_result}\t{trg_result}")
-            else:
-                print(f"{src_result}\t{trg_result}\t{score}") 
+        for r in output_list:
+            print(f"{r}")
+            
 
     # Evaluation
     if gold_standard:

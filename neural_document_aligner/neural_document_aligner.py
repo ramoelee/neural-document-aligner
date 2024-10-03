@@ -1584,10 +1584,9 @@ def main(args):
 
     for o in output_listtmp:
         if do_not_show_scores:
-            output_list.append(f"{o[1]}\t{o[1]}")
+            output_list.append(f"{o[0]}\t{o[1]}")
         else:
-            output_list.append(f"{o[1]}\t{o[1]}\t{o[2]}")
-
+            output_list.append(f"{o[0]}\t{o[1]}\t{o[2]}")
 
     if len(save_ouput_docalign_filePath) > 0:
         write_list_to_file(save_ouput_docalign_filePath, output_list)
